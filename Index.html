@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sudoku Solver</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  body { font-family: sans-serif; text-align: center; background: #f4f4f4; margin: 0; padding: 16px; }
+  h1 { font-size: 22px; }
+  table { border-collapse: collapse; margin: 12px auto; }
+  td { border: 1px solid #999; padding: 0; }
+  td:nth-child(3n) { border-right: 3px solid #000; }
+  tr:nth-child(3n) td { border-bottom: 3px solid #000; }
+  td:first-child { border-left: 3px solid #000; }
+  tr:first-child td { border-top: 3px solid #000; }
+  input.cell { width: 36px; height: 36px; text-align: center; font-size: 20px; border: none; background: #fff; }
+  input.solved { color: #0a6; font-weight: bold; }
+  button, label.btn { display: inline-block; font-size: 18px; padding: 10px 20px; margin: 6px; border: none; border-radius: 8px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.clear { background: #888; }
+  label.btn { background: #7c3aed; }
+  #file { display: none; }
+  #msg { min-height: 24px; font-size: 16px; }
+  #preview { max-width: 90%; max-height: 200px; display: none; margin: 8px auto; }
+</style>
+</head>
+<body>
+<h1>Sudoku Solver</h1>
+<label class="btn" for="file">Upload screenshot</label>
+<input type="file" id="file" accept="image/*">
+<br>
+<img id="preview" alt="preview">
+<table id="grid"></table>
+<button onclick="solveIt()">Solve</button>
+<button class="clear" onclick="clearIt()">Clear</button>
+<div id="msg"></div>
+<canvas id="work" style="display:none"></canvas>
+
+<script>
+const grid = document.getElementById('grid');
+const msg = document.getElementById('msg');
+
+for (let r = 0; r < 9; r++) {
+  const tr = document.createElement('tr');
+  for (let c = 0; c < 9; c++) {
+    const td = document.createElement('td');
+    const inp = document.createElement('input');
+    inp.className = 'cell';
+    inp.type = 'text';
+    inp.inputMode = 'numeric';
+    inp.maxLength = 1;
+    inp.id = 'c' + r + c;
+    inp.addEventListener('input', () => {
+      inp.value = inp.value.replace(/[^1-9]/g, '');
+      inp.classList.remove('solved');
+    });
+    td.appendChild(inp);
+    tr.appendChild(td);
+  }
+  grid.appendChild(tr);
+}
+
+function readBoard() {
+  const b = [];
+  for (let r = 0; r < 9; r++) {
+    b.push([]);
+    for (let c = 0; c < 9; c++) {
+      const v = document.getElementById('c' + r + c).value;
+      b[r].push(v ? parseInt(v) : 0);
+    }
+  }
+  return b;
+}
+
+function isValid(b, r, c, n) {
+  for (let i = 0; i < 9; i++) {
+    if (b[r][i] === n || b[i][c] === n) return false;
+  }
+  const br = r - r % 3, bc = c - c % 3;
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++)
+      if (b[br + i][bc + j] === n) return false;
+  return true;
+}
+
+function startIsConsistent(b) {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const n = b[r][c];
+      if (n) {
+        b[r][c] = 0;
+        const ok = isValid(b, r, c, n);
+        b[r][c] = n;
+        if (!ok) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function solve(b) {
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (b[r][c] === 0) {
+        for (let n = 1; n <= 9; n++) {
+          if (isValid(b, r, c, n)) {
+            b[r][c] = n;
+            if (solve(b)) return true;
+            b[r][c] = 0;
+          }
+        }
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function solveIt() {
+  const board = readBoard();
+  const original = board.map(row => row.slice());
+  if (!startIsConsistent(board)) {
+    msg.textContent = 'Those numbers clash. Please check them.';
+    return;
+  }
+  if (solve(board)) {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        const el = document.getElementById('c' + r + c);
+        el.value = board[r][c];
+        if (original[r][c] === 0) el.classList.add('solved');
+      }
+    }
+    msg.textContent = 'Solved!';
+  } else {
+    msg.textContent = 'No solution found. Check your numbers.';
+  }
+}
+
+function clearIt() {
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++) {
+      const el = document.getElementById('c' + r + c);
+      el.value = '';
+      el.classList.remove('solved');
+    }
+  msg.textContent = '';
+}
+
+// ---------- Screenshot reading ----------
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// Find the bounding box of the grid by looking for dark pixels
+function findGridBox(ctx, w, h) {
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let minX = w, minY = h, maxX = 0, maxY = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (gray < 90) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const size = Math.max(maxX - minX, maxY - minY);
+  return { x: minX, y: minY, size: size };
+}
+
+document.getElementById('file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  clearIt();
+  msg.textContent = 'Loading image...';
+  const img = await loadImage(file);
+  const prev = document.getElementById('preview');
+  prev.src = img.src;
+  prev.style.display = 'block';
+
+  const canvas = document.getElementById('work');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  const box = findGridBox(ctx, canvas.width, canvas.height);
+  if (box.size < 100) {
+    msg.textContent = 'Could not find the grid. Crop the screenshot to the puzzle and try again.';
+    return;
+  }
+  const cellSize = box.size / 9;
+
+  const worker = await Tesseract.createWorker('eng');
+  await worker.setParameters({
+    tessedit_char_whitelist: '123456789',
+    tessedit_pageseg_mode: '10'
+  });
+
+  const tmp = document.createElement('canvas');
+  const tctx = tmp.getContext('2d');
+  const pad = cellSize * 0.18;
+  let found = 0;
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      msg.textContent = 'Reading square ' + (r * 9 + c + 1) + ' of 81...';
+      const sx = box.x + c * cellSize + pad;
+      const sy = box.y + r * cellSize + pad;
+      const sw = cellSize - pad * 2;
+      tmp.width = 80;
+      tmp.height = 80;
+      tctx.fillStyle = '#fff';
+      tctx.fillRect(0, 0, 80, 80);
+      tctx.drawImage(canvas, sx, sy, sw, sw, 0, 0, 80, 80);
+
+      // skip empty squares: count dark pixels
+      const d = tctx.getImageData(0, 0, 80, 80).data;
+      let dark = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if ((d[i] + d[i + 1] + d[i + 2]) / 3 < 120) dark++;
+      }
+      if (dark < 60) continue;
+
+      const res = await worker.recognize(tmp);
+      const t = res.data.text.trim();
+      if (/^[1-9]$/.test(t)) {
+        document.getElementById('c' + r + c).value = t;
+        found++;
+      }
+    }
+  }
+  await worker.terminate();
+  msg.textContent = 'Found ' + found + ' numbers. Check the grid, fix any mistakes, then tap Solve.';
+});
+</script>
+</body>
+  </html>
